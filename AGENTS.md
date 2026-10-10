@@ -30,7 +30,10 @@ python analyze.py           # 不需 API，重產 out/
 - Claude 派工給 Codex 的方式（不透過 MCP）：
   1. 把任務寫成 `tasks/T-xxx.md`（目標、要改的檔案、驗收條件）
   2. `git switch -c feat/t-xxx`
-  3. `codex exec --sandbox workspace-write "依 tasks/T-xxx.md 完成任務，完成後跑驗收條件裡的指令，並把變更摘要寫到 tasks/T-xxx.result.md"`
+  3. `codex exec --sandbox workspace-write "不要執行任何 git 指令。依 tasks/T-xxx.md 完成任務，完成後跑驗收條件裡的指令，並把變更摘要寫到 tasks/T-xxx.result.md"`
   4. Claude 讀 `T-xxx.result.md` 和 `git diff main...`，審查通過再 `git switch main && git merge --no-ff feat/t-xxx`
-  - 一次只派一個 Codex 任務；超過 10 分鐘沒結束就回報給 Ino。
+  - 一次只派一個 Codex 任務；超過 10 分鐘沒結束就回報給 Ino（macOS 沒有 `timeout` 指令，用 Bash 工具本身的 timeout）。
+  - Codex 的沙盒不能寫 `.git`：開分支、commit、merge 一律由 Claude 做，Codex 只改檔案。派工時在指令裡寫明「不要執行任何 git 指令」。
+  - `T-xxx.result.md` 必須包含：改了哪些檔案、驗收指令與輸出、未完成或有疑慮的地方。沒寫就退回重做。
+- 執行計畫：`docs/RUNBOOK.md`。Ino 說「執行階段 N」時，照該階段的步驟做，完成條件全部達成才回報完成。
 - 樣本數 < 5 的組別不下結論；簡報中的數字要附樣本數。
