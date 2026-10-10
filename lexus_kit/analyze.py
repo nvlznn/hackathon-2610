@@ -33,8 +33,8 @@ INK, INK2, MUTED, GRID, AXIS = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c
 import logging
 from matplotlib import font_manager
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
-_CJK = ["Microsoft JhengHei", "PingFang TC", "Noto Sans CJK TC", "Noto Sans CJK JP", "Heiti TC",
-        "Microsoft YaHei", "Arial Unicode MS"]
+_CJK = ["Microsoft JhengHei", "Arial Unicode MS", "Hiragino Sans GB", "Hiragino Sans",
+        "Heiti TC", "PingFang TC", "Noto Sans CJK TC", "Noto Sans CJK JP", "Microsoft YaHei"]
 _have = {f.name for f in font_manager.fontManager.ttflist}
 _fonts = [f for f in _CJK if f in _have] or ["sans-serif"]
 if _fonts == ["sans-serif"]:
@@ -109,6 +109,14 @@ def pct(a, b):
     return round(100 * a / b, 1) if b else 0.0
 
 
+def source_note(data, prefix="資料"):
+    """依圖表實際使用的文章列，列出各資料來源篇數。"""
+    if data.empty or "source" not in data:
+        return f"{prefix}：來源不明 n=0"
+    counts = data["source"].fillna("來源不明").replace("", "來源不明").value_counts()
+    return f"{prefix}：" + "、".join(f"{name} n={count}" for name, count in counts.items())
+
+
 def save_bar_h(df, value_col, label_col, path, title, xlabel, color=BLUE, note=None, ref=None, ref_label=None):
     d = df.sort_values(value_col)
     fig, ax = plt.subplots(figsize=(8, 0.45 * len(d) + 1.4))
@@ -146,6 +154,7 @@ def main():
     lines += [
         "## 資料總覽",
         f"- 標註文章總數：{len(df)}",
+        f"- 資料來源：" + "、".join(f"{name} {count} 篇" for name, count in df["source"].fillna("來源不明").replace("", "來源不明").value_counts().items()),
         f"- 實質討論 Lexus 售後（relevant）：{len(rel)} 篇（{pct(len(rel), len(df))}%）",
         f"- 其中發文者為車主：{len(owners)} 篇",
         f"- 涉及經銷商信任問題：{int(df['dealer_trust_issue'].fillna(False).sum())} 篇",
@@ -172,9 +181,10 @@ def main():
         if "原廠" in t1:
             d = t1.reset_index()[["類別", "原廠"]].rename(columns={"原廠": "篇數"})
             d = d[(d["篇數"] > 0) & (d["類別"] != "其他")]
+            chart_data = rel[rel["experience_at"].isin(["原廠", "兩者都有"])]
             save_bar_h(d, "篇數", "類別", O("chart_1_pain_at_dealer.png"),
                        "原廠保養維修：車主最常抱怨什麼", "提及篇數",
-                       note=f"資料：PTT 汽車版，經驗發生在原廠的相關文章 n={int(loc_counts.get('原廠', 0) + loc_counts.get('兩者都有', 0))}")
+                       note=source_note(chart_data))
 
     # ---- 2. 流失驅動因素 ----
     base = owners
@@ -203,7 +213,7 @@ def main():
         if len(ok_chart):
             save_bar_h(ok_chart, "流失傾向比例%", "類別", O("chart_2_churn_drivers.png"),
                        "提到這類不滿的車主，多少已在猶豫或離開原廠", "伴隨流失傾向的比例（%）",
-                       note=f"僅列提及 ≥{MIN_N} 篇的類別；資料：PTT 汽車版車主發文",
+                       note=f"僅列提及 ≥{MIN_N} 篇的類別；{source_note(base)}",
                        ref=round(100 * risk_rate, 1), ref_label=f"全體車主平均 {round(100 * risk_rate, 1)}%")
 
     # ---- 3. 推文心聲 ----
@@ -232,6 +242,7 @@ def main():
         ax.yaxis.grid(True, color=GRID, linewidth=0.8)
         ax.set_axisbelow(True)
         ax.set_ylim(0, max(d["流失傾向比例%"].max() * 1.3, 10))
+        fig.text(0.01, 0.01, source_note(owners[owners["age_band"].isin(known.index)]), color=MUTED, fontsize=9)
         fig.tight_layout()
         fig.savefig(O("chart_3_risk_by_age.png"), dpi=200)
         plt.close(fig)
@@ -262,6 +273,7 @@ def main():
         ax.yaxis.grid(True, color=GRID, linewidth=0.8)
         ax.set_axisbelow(True)
         ax.set_ylim(0, max(pt["流失傾向比例%"].max() * 1.35, 10))
+        fig.text(0.01, 0.01, source_note(owners[owners["purchase_type"].isin(["新車", "二手"])]), color=MUTED, fontsize=9)
         fig.tight_layout()
         fig.savefig(O("chart_5_new_vs_used.png"), dpi=200)
         plt.close(fig)
@@ -287,6 +299,7 @@ def main():
         ax.set_axisbelow(True)
         ax.set_ylim(bottom=0)
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+        fig.text(0.01, 0.01, source_note(m), color=MUTED, fontsize=9)
         fig.tight_layout()
         fig.savefig(O("chart_4_quarterly.png"), dpi=200)
         plt.close(fig)
@@ -294,7 +307,9 @@ def main():
     # ---- 7. 代表性原文 ----
     qs = []
     for cat in pain_all.index:
-        sub = rel[rel["all_cats"].apply(lambda l: cat in l)].sort_values("n_comments", ascending=False)
+        sub = rel[(rel["sentiment"] == "負面") & (rel["relevant"] == True) &
+                  rel["all_cats"].apply(lambda l: cat in l) &
+                  rel["evidence_quote"].fillna("").astype(str).str.strip().ne("")].sort_values("n_comments", ascending=False)
         for _, r in sub.head(5).iterrows():
             qs.append({"類別": cat, "原文": r.get("evidence_quote", ""), "標題": r.get("title", ""),
                        "立場": r.get("stance_to_dealer", ""), "地點": r.get("experience_at", ""),
