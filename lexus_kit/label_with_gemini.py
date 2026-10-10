@@ -5,6 +5,7 @@
     export GEMINI_API_KEY=你的金鑰
     python label_with_gemini.py --inp data/ptt_lexus.jsonl --out data/labels.jsonl
     python label_with_gemini.py --inp data/ptt_lexus.jsonl --out data/labels.jsonl --limit 30   # 先試 30 篇
+    python label_with_gemini.py --inp data/ptt_lexus.jsonl --out data/labels_v2.jsonl --model gemini-2.5-pro --fewshot data/examples.txt --ids data/t103_ids.txt
 
 輸出：
     data/labels.jsonl  每篇一列，含所有標註欄位
@@ -21,7 +22,7 @@ import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 import pandas as pd
 from google import genai
@@ -93,6 +94,8 @@ class Label(BaseModel):
     comment_churn_reasons: List[str] = Field(description="推文中網友說離開原廠的原因，每點 15 字以內，最多 3 點；沒有則空陣列")
     evidence_quote: str = Field(description="最能代表立場的一句原文，40 字以內")
     summary: str = Field(description="一句話摘要，40 字以內")
+    confidence: Literal["高", "中", "低"] = Field(description="對 relevant、sentiment、stance_to_dealer 三項判斷的把握。文意模糊、資訊不足、或規則難以套用時填低")
+    reason: str = Field(description="relevant、sentiment、stance_to_dealer 的判斷依據，60 字以內")
 
 
 PROMPT = """你是汽車售後服務的研究員。以下是一篇台灣網路論壇的貼文與推文。
@@ -143,16 +146,20 @@ def strip_quotes(text):
     return "\n".join(keep).strip()
 
 
-def build_prompt(post, max_chars=3500, max_comments=80):
+def build_prompt(post, max_chars=3500, max_comments=80, fewshot=None):
     comments = post.get("comments", [])[:max_comments]
     ctext = "\n".join(f"{c['tag']} {c['content']}" for c in comments)
-    return PROMPT.format(
+    prompt = PROMPT.format(
         title=post.get("title", ""),
         published=post.get("published", ""),
         content=strip_quotes(post.get("content", ""))[:max_chars],
         n=len(comments),
         comments=ctext[:4000],
     )
+    if fewshot is not None:
+        marker = "標題："
+        prompt = prompt.replace(marker, "以下是人工確認過答案的範例，請依同樣標準判斷：\n" + fewshot.rstrip() + "\n\n" + marker, 1)
+    return prompt
 
 
 OWNERS = {"現任車主", "前車主"}
@@ -198,13 +205,13 @@ def retry_delay(err, default):
     return float(m.group(1)) + 1 if m else default
 
 
-def label_one(client, post, tries=6):
+def label_one(client, post, model=MODEL, fewshot=None, fewshot_name=None, tries=6):
     for i in range(tries):
         LIMITER.wait()
         try:
             resp = client.models.generate_content(
-                model=MODEL,
-                contents=build_prompt(post),
+                model=model,
+                contents=build_prompt(post, fewshot=fewshot),
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     response_schema=Label,
@@ -215,7 +222,8 @@ def label_one(client, post, tries=6):
             data = enforce_rules(json.loads(resp.text))
             return {"id": post["id"], "url": post["url"], "title": post["title"],
                     "published": post.get("published"), "source": post.get("source"),
-                    "n_comments": len(post.get("comments", [])), **data}
+                    "n_comments": len(post.get("comments", [])), **data,
+                    "label_model": model, "fewshot": fewshot_name}
         except Exception as e:  # 額度或暫時性錯誤：等一下再試
             msg = str(e)
             if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
@@ -240,6 +248,9 @@ def main():
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--rpm", type=int, default=14,
                     help="每分鐘最多幾次請求。免費方案用預設 14；開啟付費後可設 0（不限速）")
+    ap.add_argument("--model", default=MODEL, help="覆蓋標註模型")
+    ap.add_argument("--fewshot", help="插入標題前的人工確認範例檔")
+    ap.add_argument("--ids", help="只標此檔列出的 id，每行一個")
     args = ap.parse_args()
     global LIMITER
     LIMITER = RateLimiter(args.rpm)
@@ -249,7 +260,15 @@ def main():
     if os.path.exists(args.out):
         good = read_jsonl(args.out, repair=True)
         done = {r["id"] for r in good}
-    todo = [p for p in posts if p["id"] not in done]
+    requested = None
+    if args.ids:
+        with open(args.ids, encoding="utf-8") as f:
+            requested = {line.strip() for line in f if line.strip() and not line.lstrip().startswith("#")}
+        available = {p["id"] for p in posts}
+        missing = requested - available
+        if missing:
+            print(f"警告：--ids 中有 {len(missing)} 個 id 在輸入檔找不到")
+    todo = [p for p in posts if p["id"] not in done and (requested is None or p["id"] in requested)]
     if args.aftersales_only:
         todo = [p for p in todo if p.get("found_by_query") in AFTERSALES_QUERIES]
     if args.sample:
@@ -262,7 +281,11 @@ def main():
     client = genai.Client()  # 讀取環境變數 GEMINI_API_KEY
     ex = ThreadPoolExecutor(args.workers)
     out = open(args.out, "a", encoding="utf-8")
-    pending = {ex.submit(label_one, client, p) for p in todo}
+    fewshot_text = None
+    if args.fewshot:
+        with open(args.fewshot, encoding="utf-8") as f:
+            fewshot_text = f.read()
+    pending = {ex.submit(label_one, client, p, args.model, fewshot_text, os.path.basename(args.fewshot) if args.fewshot else None) for p in todo}
     k = 0
     try:
         while pending:

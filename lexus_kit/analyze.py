@@ -149,18 +149,43 @@ def main():
     rel = df[df["relevant"] == True]
     owners = rel[rel["owner"]]
     lines = ["# Lexus 售後輿情分析重點", ""]
+    sources = df["source"].fillna("來源不明").replace("", "來源不明")
+    source_counts = sources.value_counts()
+    periods = []
+    for name in source_counts.index:
+        dates = df.loc[sources == name, "published"].dropna()
+        if not dates.empty:
+            periods.append(f"{name} {dates.min():%Y-%m-%d} 至 {dates.max():%Y-%m-%d}")
+    source_comparison = ["## 各來源比較"]
+    for name in source_counts.index:
+        source_rows = df[sources == name]
+        source_rel = rel[sources.loc[rel.index] == name]
+        source_owners = owners[sources.loc[owners.index] == name]
+        at_risk = int(source_owners["at_risk"].sum())
+        owner_count = len(source_owners)
+        insufficient = "（樣本不足，不下結論）" if owner_count < MIN_N else ""
+        source_comparison.append(
+            f"- {name}：標註 {len(source_rows)} 篇；relevant {len(source_rel)} 篇；"
+            f"車主發文 {owner_count} 篇；車主中猶豫或已轉外廠 {pct(at_risk, owner_count)}%"
+            f"（{at_risk}/{owner_count}）{insufficient}"
+        )
+    source_comparison += [
+        "- 註：Mobile01、Dcard 為人工挑選的討論串，比例不代表該平台整體；跨來源合併數字以 PTT 為主體。",
+        "",
+    ]
 
     # ---- 0. 總覽 ----
     lines += [
         "## 資料總覽",
         f"- 標註文章總數：{len(df)}",
-        f"- 資料來源：" + "、".join(f"{name} {count} 篇" for name, count in df["source"].fillna("來源不明").replace("", "來源不明").value_counts().items()),
+        f"- 資料來源：" + "、".join(f"{name} {count} 篇" for name, count in source_counts.items()),
         f"- 實質討論 Lexus 售後（relevant）：{len(rel)} 篇（{pct(len(rel), len(df))}%）",
         f"- 其中發文者為車主：{len(owners)} 篇",
         f"- 涉及經銷商信任問題：{int(df['dealer_trust_issue'].fillna(False).sum())} 篇",
-        f"- 資料期間：{df['published'].min():%Y-%m-%d} 至 {df['published'].max():%Y-%m-%d}",
+        "- 資料期間：" + "；".join(periods),
         "",
     ]
+    lines += source_comparison
 
     # ---- 1. 不滿類別：原廠 vs 外廠 ----
     pain = []
@@ -280,10 +305,10 @@ def main():
         lines.extend(["## 購車方式與流失傾向"] + [f"- {r['組別']}：{r['流失傾向比例%']}%（{int(r['猶豫或已轉外廠'])}/{int(r['車主篇數'])}）" for _, r in pt.iterrows()] + [""])
 
     # ---- 6. 每月趨勢 ----
-    m = rel.dropna(subset=["published"]).copy()
+    m = rel[(rel["source"] == "PTT") & rel["published"].notna()].copy()
     m["月份"] = m["published"].dt.to_period("M").astype(str)
     t6 = m.groupby("月份").agg(相關篇數=("id", "size"), 負面篇數=("sentiment", lambda s: (s == "負面").sum()))
-    trust = df.dropna(subset=["published"]).copy()
+    trust = df[(df["source"] == "PTT") & df["published"].notna()].copy()
     trust["月份"] = trust["published"].dt.to_period("M").astype(str)
     t6 = t6.join(trust[trust["dealer_trust_issue"] == True].groupby("月份").size().rename("經銷商信任篇數"), how="outer").fillna(0).astype(int)
     t6["負面比例%"] = (100 * t6["負面篇數"] / t6["相關篇數"].where(t6["相關篇數"] > 0)).astype(float).round(1)
@@ -293,14 +318,17 @@ def main():
         q.index = pd.PeriodIndex(q.index, freq="M")
         q = q.resample("Q").sum(numeric_only=True)
         fig, ax = plt.subplots(figsize=(8, 3.6))
-        ax.plot(q.index.astype(str), q["相關篇數"], color=BLUE, linewidth=2, marker="o", markersize=5)
+        ax.plot(range(len(q)), q["相關篇數"], color=BLUE, linewidth=2, marker="o", markersize=5)
+        year_ticks = [(i, str(period.year)) for i, period in enumerate(q.index) if period.quarter == 1]
+        ax.set_xticks([i for i, _ in year_ticks], [year for _, year in year_ticks])
         ax.set_title("每季 Lexus 售後相關討論篇數", loc="left", color=INK, fontsize=13, fontweight="bold")
         ax.yaxis.grid(True, color=GRID, linewidth=0.8)
         ax.set_axisbelow(True)
         ax.set_ylim(bottom=0)
-        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-        fig.text(0.01, 0.01, source_note(m), color=MUTED, fontsize=9)
-        fig.tight_layout()
+        fig.text(0.01, 0.025,
+                 f"趨勢僅用 PTT（連續爬取）n={len(m)}；Mobile01、Dcard 為人工挑選的討論串，不納入趨勢",
+                 color=MUTED, fontsize=9)
+        fig.tight_layout(rect=(0, 0.07, 1, 1))
         fig.savefig(O("chart_4_quarterly.png"), dpi=200)
         plt.close(fig)
 

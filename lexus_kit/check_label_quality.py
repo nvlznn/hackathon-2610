@@ -15,6 +15,9 @@
 
 建立 Gemini 與 Codex 分歧表：
     python check_label_quality.py disagree --labels data/labels.jsonl --codex data/codex_labels.csv --out data/disagreements.csv
+
+比較兩版標註（人工裁決優先）：
+    python check_label_quality.py compare --sheet data/review_sheet.csv --disagree data/disagreements.csv --a data/labels.jsonl --b data/labels_v2.jsonl [--exclude data/fewshot_ids.txt] [--md /tmp/compare.md]
 """
 import argparse
 from datetime import date
@@ -96,6 +99,66 @@ def score(args):
             print(f"{field} 裁決：與 Gemini 相同 {counts[0]}、與 Codex 相同 {counts[1]}、兩者皆不同 {counts[2]}")
     if args.md:
         _write_report(args.md, args, pairs, report_rows, m, adjudication, codex)
+
+
+COMPARE_FIELDS = [("是否相關", "human_relevant", "relevant", "adjudicated_relevant"),
+                  ("情緒", "human_sentiment", "sentiment", "adjudicated_sentiment"),
+                  ("對原廠立場", "human_stance", "stance_to_dealer", "adjudicated_stance")]
+
+
+def compare(args):
+    sheet = _read_csv_fallback(args.sheet).fillna("")
+    a_rows, b_rows = _read_jsonl(args.a), _read_jsonl(args.b)
+    amap, bmap = {r["id"]: r for r in a_rows}, {r["id"]: r for r in b_rows}
+    dmap = {str(r["id"]): r for r in _read_csv_fallback(args.disagree).fillna("").to_dict("records")}
+    excluded = set()
+    if args.exclude:
+        excluded = {x.strip() for x in open(args.exclude, encoding="utf-8") if x.strip() and not x.lstrip().startswith("#")}
+    base_ids = {str(r["id"]) for r in sheet.to_dict("records")} & set(amap) & set(bmap)
+    ids = sorted(base_ids - excluded)
+    print(f"比較範圍篇數：{len(ids)}；被排除數：{len(base_ids & excluded)}")
+    rows_by_id = {str(r["id"]): r for r in sheet.to_dict("records")}
+    def norm(field, v):
+        if field == "是否相關":
+            return "是" if v is True or str(v).strip().lower() in {"true", "是"} else "否" if v is False or str(v).strip().lower() in {"false", "否"} else ""
+        return str(v).strip()
+    golds, disagreements = {}, 0
+    for id_ in rows_by_id:
+        sr, dr = rows_by_id[id_], dmap.get(id_, {})
+        for label, hcol, acol, adjud_col in COMPARE_FIELDS:
+            hv, av = str(sr.get(hcol, "")).strip(), str(dr.get(adjud_col, "")).strip()
+            if av:
+                disagreements += int(bool(hv) and norm(label, av) != norm(label, hv))
+            golds[(id_, label)] = norm(label, av or hv)
+    print(f"裁決與人工不同：{disagreements} 格")
+    report = []
+    for label, hcol, acol, _ in COMPARE_FIELDS:
+        vals = []
+        for source in (amap, bmap):
+            pairs = [(norm(label, source[i].get(acol, "")), golds[(i, label)]) for i in ids if golds[(i, label)]]
+            correct = sum(x == y for x, y in pairs)
+            vals.append((correct / len(pairs) if pairs else None, len(pairs)))
+        delta = None if vals[0][0] is None or vals[1][0] is None else (vals[1][0] - vals[0][0]) * 100
+        print(f"{label}：A {_pct_n(vals[0])}；B {_pct_n(vals[1])}；差值 {delta:+.1f} 個百分點" if delta is not None else f"{label}：A {_pct_n(vals[0])}；B {_pct_n(vals[1])}；差值 無資料")
+        report.append((label, vals, delta))
+    diffs = []
+    for i in ids:
+        for label, _, acol, _ in COMPARE_FIELDS:
+            av, bv = norm(label, amap[i].get(acol, "")), norm(label, bmap[i].get(acol, ""))
+            if av != bv:
+                row = (i, rows_by_id[i].get("title", ""), label, av, bv, golds[(i, label)], bmap[i].get("confidence", ""), bmap[i].get("reason", ""))
+                diffs.append(row)
+                print("差異：" + " | ".join(map(str, row)))
+    conf = {k: sum(r.get("confidence") == k for r in b_rows) for k in ("高", "中", "低")}
+    flips = sum(amap[i].get("relevant") is True and bmap[i].get("relevant") is False for i in bmap if i in amap)
+    print(f"B 全部篇數：{len(b_rows)}；confidence 高／中／低：{conf['高']}／{conf['中']}／{conf['低']}；v1 是→v2 否：{flips} 篇")
+    if args.md:
+        md = ["# v1 / v2 標註比較", "", f"產生日期：{date.today().isoformat()}", "", "## 資料說明", "", f"- A：`{args.a}`；label_model：{', '.join(sorted({str(r.get('label_model', '未記錄')) for r in a_rows}))}", f"- B：`{args.b}`；label_model：{', '.join(sorted({str(r.get('label_model', '未記錄')) for r in b_rows}))}", f"- review：`{args.sheet}`；disagreements：`{args.disagree}`", f"- 比較篇數：{len(ids)}；排除：{len(base_ids & excluded)}；裁決與人工不同：{disagreements} 格", "", "## 一致率", "", "| 欄位 | A vs gold | B vs gold | 差值（百分點） |", "|---|---:|---:|---:|"]
+        md += [f"| {label} | {_pct_n(v[0])} | {_pct_n(v[1])} | {delta:+.1f} |" for label, v, delta in report]
+        md += ["", "## 差異明細", "", "| id | title | 欄位 | A | B | gold | B confidence | B reason |", "|---|---|---|---|---|---|---|---|"]
+        md += ["| " + " | ".join(str(x).replace("|", "\\|").replace("\n", " ") for x in row) + " |" for row in diffs]
+        md += ["", "## Confidence 分布", "", f"B 全部 {len(b_rows)} 篇：高 {conf['高']}、中 {conf['中']}、低 {conf['低']}；v1 是變 v2 否：{flips} 篇。", ""]
+        Path(args.md).write_text("\n".join(md), encoding="utf-8")
 
 
 def _read_csv_fallback(path):
@@ -227,7 +290,15 @@ if __name__ == "__main__":
     s3.add_argument("--labels", default="data/labels.jsonl")
     s3.add_argument("--codex", default="data/codex_labels.csv")
     s3.add_argument("--out", default="data/disagreements.csv")
+    s4 = sp.add_parser("compare")
+    s4.add_argument("--sheet", required=True)
+    s4.add_argument("--disagree", required=True)
+    s4.add_argument("--a", required=True)
+    s4.add_argument("--b", required=True)
+    s4.add_argument("--exclude")
+    s4.add_argument("--md")
     args = ap.parse_args()
     if args.cmd == "sample": sample(args)
     elif args.cmd == "disagree": disagree(args)
+    elif args.cmd == "compare": compare(args)
     else: score(args)

@@ -1,0 +1,10 @@
+# data/fewshot.md 使用的範例 id。答案取自人工標註（review_sheet.csv human_*，或 disagreements.csv adjudicated_*）；
+# 內文摘要與理由由 Claude 依原文撰寫。這些 id 在 v1/v2 比較時要排除（check_label_quality.py compare --exclude）。
+# 類型 A 相關性過寬
+ptt_M.1750560047.A.982
+# 類型 B 情緒偏正面（他牌文推文稱讚 Lexus）
+ptt_M.1744180708.A.5BC
+# 類型 D 詢問外廠＝猶豫
+ptt_M.1733831558.A.5C9
+# 類型 C 漏判負面
+ptt_M.1666700890.A.433
