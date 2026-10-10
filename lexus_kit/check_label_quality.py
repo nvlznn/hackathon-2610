@@ -172,7 +172,8 @@ def _adjudication_stats(path):
                                     ("情緒", "gemini_sentiment", "codex_sentiment", "adjudicated_sentiment"),
                                     ("對原廠立場", "gemini_stance", "codex_stance", "adjudicated_stance")]:
         if acol not in d: continue
-        sub = d[d[acol].astype(str).str.strip() != ""]
+        # 只統計這個欄位真的有分歧的列；兩者一致的列裁決必然同時等於兩邊，不該重複計入
+        sub = d[(d[acol].astype(str).str.strip() != "") & (_clean(d[gcol]) != _clean(d[ccol]))]
         g, c, a = _clean(sub[gcol]), _clean(sub[ccol]), _clean(sub[acol])
         stats[name] = (int((a == g).sum()), int((a == c).sum()), int(((a != g) & (a != c)).sum()))
     return stats
@@ -196,8 +197,17 @@ def _write_report(path, args, pairs, rows, scored, adjudication, codex):
     if adjudication is not None:
         lines += ["## 分歧裁決統計", "", "| 欄位 | 與 Gemini 相同 | 與 Codex 相同 | 兩者皆不同 |", "|---|---:|---:|---:|"]
         lines += [f"| {field} | {v[0]} | {v[1]} | {v[2]} |" for field, v in adjudication.items()]
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # 保留報告中 <!-- manual --> 以下的人工撰寫段落，重跑時不覆蓋
+    out, manual = Path(path), ""
+    if out.exists():
+        old = out.read_text(encoding="utf-8")
+        if MANUAL_MARK in old:
+            manual = "\n" + old[old.index(MANUAL_MARK):]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines) + "\n" + manual, encoding="utf-8")
+
+
+MANUAL_MARK = "<!-- manual -->"
 
 
 if __name__ == "__main__":
