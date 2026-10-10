@@ -1,0 +1,136 @@
+{
+  "version": "frozen-2026-10-10",
+  "source_doc": "docs/insights.md",
+  "data_dir": "out/ptt_only",
+  "note": "內容與 docs/insights.md 一致；改洞察時先改 insights.md 再同步本檔。數字權重不寫死，由程式從 ref 指向的 CSV 讀取。",
+  "personas": [
+    {
+      "id": "A",
+      "name": "保固後精算型",
+      "primary": true,
+      "traits": "車齡接近或超過 4 年；保固期內為了保固準時回廠，過保後開始比價；會拿報價單上網問是不是被當盤子。",
+      "evidence": ["發現 1：價格與收費", "發現 2：車齡與保固"],
+      "churn_risk": "高",
+      "triggers": ["基本保證到期前 90 天", "保固到期後第一次回廠報價"],
+      "goal": "讓報價透明（必要／建議項目分開說明），讓車主知道過保後在原廠還有哪些保障與回饋。不降價、不打折。",
+      "pain_points": ["報價單建議項目不透明", "怕被當盤子", "保固到期後失去回原廠的理由"],
+      "knowledge_refs": [
+        {"topic": "售後零件保證 2 年或 5 萬公里", "pages": ["p.3", "p.9"]},
+        {"topic": "和泰 Points 1.5% 回饋", "pages": ["p.5"]},
+        {"topic": "延長保證加購 5 年或 14 萬公里，25,900 元起", "pages": ["p.2"]},
+        {"topic": "全年尊榮安檢", "pages": ["p.8"]},
+        {"topic": "基本保證 4 年或 12 萬公里", "pages": ["p.2", "p.8"]}
+      ],
+      "touchpoints": ["服務專員話術", "LINE", "App 推播"]
+    },
+    {
+      "id": "B",
+      "name": "二手入主型",
+      "primary": false,
+      "traits": "非原始購車人（含 CPO）；和經銷商沒有購車關係，不清楚這台車還剩哪些權益；習慣基本保養回原廠、大修去外廠。",
+      "evidence": ["發現 3：二手 vs 新車"],
+      "churn_risk": "中高",
+      "triggers": ["過戶後第一次回廠（或第一次在 CRM 出現）"],
+      "goal": "歡迎並說清楚這台車還有什麼：保證以原交車日起算的剩餘期限、道路救援以領牌日起算 4 年內、App 可查愛車紀錄。",
+      "pain_points": ["權益不明", "沒有經銷商關係", "大修傾向去外廠"],
+      "knowledge_refs": [
+        {"topic": "基本保證自交車日起 4 年或 12 萬公里", "pages": ["p.2", "p.8"]},
+        {"topic": "尊榮道路救援自領牌日起 4 年內", "pages": ["p.18-21"]},
+        {"topic": "Lexus Plus App 查詢愛車紀錄", "pages": ["p.2"]}
+      ],
+      "touchpoints": ["服務專員話術", "App 推播", "LINE"]
+    },
+    {
+      "id": "C",
+      "name": "新車守護型",
+      "primary": false,
+      "traits": "車齡 0–3 年的新車車主；目前大多準時回廠，但第一次看到報價單上的建議項目就開始懷疑要不要刪單。",
+      "evidence": ["發現 2：車齡與保固", "發現 3：二手 vs 新車"],
+      "churn_risk": "低（現在），信任建立期",
+      "triggers": ["每次定保提醒", "首半年保養之後第一次自付的保養"],
+      "goal": "建立準時定保有回報的習慣（連續準時 8 次定保享延長保證、Elite Rewards 隨準時定保升級）；第一次報價就逐項說明，先建立信任。",
+      "pain_points": ["懷疑建議項目是在多收錢", "不知道準時定保有什麼回報"],
+      "knowledge_refs": [
+        {"topic": "新車首半年保養工資免費，油品零件自付", "pages": ["p.2", "p.16"]},
+        {"topic": "連續準時 8 次定保享延長保證", "pages": ["p.2"]},
+        {"topic": "Elite Rewards 等級隨車齡與準時定保升級", "pages": ["p.2"]},
+        {"topic": "定期保養每半年或每一萬公里", "pages": ["p.2", "p.16"]}
+      ],
+      "touchpoints": ["App 推播", "LINE", "服務專員話術"]
+    }
+  ],
+  "risk_factors": [
+    {
+      "id": "warranty_ending",
+      "name": "保固將屆",
+      "rule": "交車日 + 4 年 - 今天 <= 90 天，或距 12 萬公里不到 1 萬公里",
+      "threshold_source": "4 年／12 萬公里：手冊 p.2, p.8；90 天、1 萬公里：假設",
+      "weight_ref": {"file": "02_churn_drivers.csv", "row": "保固與權益", "col": "相對整體倍數"},
+      "personas": ["A"]
+    },
+    {
+      "id": "warranty_expired",
+      "name": "已過保固、未加購延保",
+      "rule": "交車日 + 4 年 < 今天，且無延長保證紀錄",
+      "threshold_source": "手冊 p.2",
+      "weight_ref": {"file": "02_churn_drivers.csv", "row": "保固與權益", "col": "相對整體倍數"},
+      "personas": ["A"]
+    },
+    {
+      "id": "car_age",
+      "name": "車齡偏高",
+      "rule": "車齡 >= 5 年",
+      "threshold_source": "04_risk_by_age.csv 分段",
+      "weight_ref": {"file": "04_risk_by_age.csv", "rows": ["5–10 年", "10 年以上"], "col": "流失傾向比例%", "baseline": "summary.md 車主整體流失傾向"},
+      "personas": ["A"]
+    },
+    {
+      "id": "price_sensitive",
+      "name": "報價敏感",
+      "rule": "上次保養建議項目被拒比例 >= 50%，或保養金額 > 同車型同里程 P75",
+      "threshold_source": "假設",
+      "weight_ref": {"file": "02_churn_drivers.csv", "row": "價格與收費", "col": "相對整體倍數"},
+      "personas": ["A", "C"]
+    },
+    {
+      "id": "used_owner",
+      "name": "二手入主",
+      "rule": "非原始購車人（過戶紀錄、CPO）",
+      "threshold_source": "—",
+      "weight_ref": {"file": "05_risk_by_segment.csv", "dimension": "購車方式", "row": "二手", "col": "流失傾向比例%", "baseline": "summary.md 車主整體流失傾向"},
+      "personas": ["B"]
+    },
+    {
+      "id": "disengaged",
+      "name": "回廠疏離",
+      "rule": "距上次回廠 > 8 個月",
+      "threshold_source": "定保每半年：手冊 p.2；2 個月緩衝：假設",
+      "weight_ref": null,
+      "personas": ["A", "B"]
+    },
+    {
+      "id": "benefit_break",
+      "name": "權益中斷",
+      "rule": "準時定保連續次數中斷；Elite 等級下降或未續保任意險",
+      "threshold_source": "連續 8 次、Elite 條件：手冊 p.2",
+      "weight_ref": null,
+      "personas": ["C", "A"]
+    },
+    {
+      "id": "service_friction",
+      "name": "服務摩擦",
+      "rule": "近 12 個月有 0800 客訴或關懷問卷低分",
+      "threshold_source": "問卷與電話關懷：手冊 p.6；12 個月：假設",
+      "weight_ref": {"file": "02_churn_drivers.csv", "row": "服務態度", "col": "相對整體倍數"},
+      "personas": ["A", "B", "C"]
+    },
+    {
+      "id": "dealer_trust_event",
+      "name": "經銷商信任事件",
+      "rule": "輿情監測偵測到某經銷商信任討論激增時，該經銷商的車主風險加權",
+      "threshold_source": "激增定義：假設",
+      "weight_ref": null,
+      "personas": ["A", "B", "C"]
+    }
+  ]
+}
