@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+__pycache__/
+.env
+*.env
+lexus_kit/probe/
+# 主辦單位寄送的解題資源：僅供競賽使用，不得外流
+official/
+# 由主辦單位資料衍生的知識庫，同樣不外流
+lexus_kit/knowledge/
+# 收集工具的暫存與產出
+lexus_kit/collector/queue.html
+lexus_kit/collector/.captest.json
