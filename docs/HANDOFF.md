@@ -15,15 +15,17 @@
     `data/disagreements.csv`（16 列，待 Ino 裁決）、`out/label_quality.md`（三組一致率已算出，裁決統計待填）。
   - `codex exec` 一定要加 `< /dev/null`，否則會卡在等 stdin。
 
-## 等待 Ino
-1. 確認 `data/review_sheet.csv` 的人工欄位全是本人判斷（.bak 是空白版）。
-2. 在 `data/disagreements.csv` 填 `adjudicated_relevant/sentiment/stance`（16 列，要點開原文）。
-3. 填完後 Claude 重跑：
-   `python check_label_quality.py score --sheet data/review_sheet.csv --labels data/labels.jsonl --codex data/codex_labels.csv --disagree data/disagreements.csv --md out/label_quality.md`
-   並在報告補「Gemini 錯在哪幾類」，commit review_sheet.csv 與報告 → 階段 2 完成。
+## 階段 2 已完成（2026-10-10）
+- Ino 確認 review_sheet 人工欄位為本人判斷（有看原文），並裁決 16 列分歧；皆已 commit。
+- `out/label_quality.md`：三組一致率（各 n=60）＋裁決統計＋「Gemini 錯誤類型分析」（`<!-- manual -->` 以下為手寫，重跑 score --md 會保留）。
+- 重點：Gemini vs 人工 相關 88%／情緒 83%／立場 90%；Codex vs 人工 93%／92%／90%。分歧裁決偏向 Codex（相關 4:1、情緒 7:2、立場 3:4）。
 
-## 接下來
-- 階段 3 後半（RUNBOOK 新增的兩段式標註）：派 Codex 改 label_with_gemini.py（--model/--fewshot/--ids、confidence/reason）→ fewshot.md 取自裁決結果 → relevant=True 用較強模型重標 → 比較 v1/v2 → categorize + analyze → merge feat/multi-source。
+## 接下來：階段 3 後半（在 `feat/multi-source` 上做，做完才 merge）
+1. 派 Codex（T-105）改 label_with_gemini.py：--model、--fewshot、--ids、輸出 confidence/reason；不得改既有欄位定義。
+2. `data/fewshot.md`：依 label_quality.md 的錯誤類型 A、B、D 從裁決／人工答案挑 3–5 則（相關性過寬的購車文、他牌文推文稱讚 Lexus、接手二手車詢問外廠＝猶豫）。
+3. relevant=True 全部用較強 Gemini 模型＋few-shot 重標 → labels_v2.jsonl；在人工 60 篇上比 v1/v2；較好就取代並重跑 categorize + analyze。
+4. confidence=低 → data/low_confidence.csv。
+5. Ino 同時：讀 07_quotes.csv 價格類原文，回答「貴」還是「不透明」。
 - 之後照 RUNBOOK 階段 4 起。
 
 ## 規則提醒
