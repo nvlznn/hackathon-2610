@@ -1,30 +1,31 @@
 # HANDOFF（Ino 回來說 "continue" 時，Claude 從這裡接）
 
-更新：2026-10-10。截止 2026-10-14 13:00。
+更新：2026-10-10 下午。截止 2026-10-14 13:00。
 
 ## 已完成
-- 階段 0、1：merge 進 main（analyze.py 修好：quotes 只留負面且 relevant、註腳依 source 動態、中文字型）。
-- T-102（collector 提速）已 merge：書籤改成佇列存 localStorage、Mobile01 自動捲動、存完 2 秒後跳下一篇。**尚未在真實網站測過**。舊書籤要用新的 `lexus_kit/collector/bookmarklet.txt` 覆蓋。
-- `lexus_kit/data/review_sheet.csv`（60 筆，未被 git 追蹤）已產生，等 Ino 人工填 `human_relevant/human_sentiment/human_stance` 後存回原檔名（CSV UTF-8）。
+- 階段 0、1：已 merge。
+- 論壇收集（Claude 用 Claude in Chrome 在 Ino 的 Brave 收）：Mobile01 29 串、Dcard 22 篇、留言 1033 則。
+  原始檔 `lexus_kit/data/captures/`，匯入結果 `data/forum_manual.jsonl`。Ino 已允許 mobile01.com、dcard.tw 的「本機網路存取」。
+  方法：頁面內執行擷取腳本 → POST 到本機 127.0.0.1:8765 的接收器（scratchpad 的 recv.py，已關閉）。
+- 階段 3 前半（分支 `feat/multi-source`，**尚未 merge**）：import_captures 修正 Dcard 發文時間；51 篇已用 Gemini（gemini-3.5-flash-lite）標註，labels.jsonl 共 1640 篇。
+  GEMINI_API_KEY 在 ~/.zshrc（Claude 的 shell 要先 `source ~/.zshrc`）。
+- 階段 2（新流程）：
+  - T-103 已 merge：Codex 獨立標註 60 篇 → `data/codex_labels.csv`。規則抽在 `tasks/T-103_rules.md`。
+  - T-104 已 merge：`check_label_quality.py disagree` 與 `score --codex --disagree --md`。
+    `data/disagreements.csv`（16 列，待 Ino 裁決）、`out/label_quality.md`（三組一致率已算出，裁決統計待填）。
+  - `codex exec` 一定要加 `< /dev/null`，否則會卡在等 stdin。
 
-## 使用者決定（不可更動）
-- Ino 授權 Claude 做所有決定，目標只有「結果品質最好」；階段結束時給摘要（Claude 不能自己 /exit、/clear）。
-- 人工標註 60 筆由 Ino 親自做。**Codex 不得冒充人工標註**；Codex 另外獨立標同 60 筆（不給看 Gemini 答案）→ 報告寫「雙 AI 一致率」，與「人工一致率」分開寫、各附 n。Claude 已明確拒絕把 AI 標註寫成人工。
-- 不規避反爬；Mobile01 回 403。
+## 等待 Ino
+1. 確認 `data/review_sheet.csv` 的人工欄位全是本人判斷（.bak 是空白版）。
+2. 在 `data/disagreements.csv` 填 `adjudicated_relevant/sentiment/stance`（16 列，要點開原文）。
+3. 填完後 Claude 重跑：
+   `python check_label_quality.py score --sheet data/review_sheet.csv --labels data/labels.jsonl --codex data/codex_labels.csv --disagree data/disagreements.csv --md out/label_quality.md`
+   並在報告補「Gemini 錯在哪幾類」，commit review_sheet.csv 與報告 → 階段 2 完成。
 
-## 等待中
-1. Ino 正在重啟 Claude Code 以載入 Claude in Chrome 擴充功能（已安裝並 /chrome）。回來說 "continue" 後：
-   - 先用 ToolSearch 確認 `mcp__claude-in-chrome__*` 工具存在；不存在就回報，不要重試很多次。
-   - 存在：`tabs_context_mcp` → 新分頁，在 Mobile01 Lexus 討論區／站內搜尋「Lexus 保養」、Dcard 搜尋（關鍵字見 collector/README.md）按書籤收集（目標 Mobile01 40 串、Dcard 30 篇；時間緊就降到 20／15）。遇 Cloudflare、登入牆、權限提示就停下交給 Ino，不繞過。下載檔在 ~/Downloads（lexus_cap_*.json），之後 `python import_captures.py` 讀取（檢查 --src 預設路徑）。
-2. Ino 的 review_sheet.csv 回傳。
+## 接下來
+- 階段 3 後半（RUNBOOK 新增的兩段式標註）：派 Codex 改 label_with_gemini.py（--model/--fewshot/--ids、confidence/reason）→ fewshot.md 取自裁決結果 → relevant=True 用較強模型重標 → 比較 v1/v2 → categorize + analyze → merge feat/multi-source。
+- 之後照 RUNBOOK 階段 4 起。
 
-## 接下來 Claude 要做（不等論壇資料，PTT 1589 篇為主）
-- 派 Codex 獨立標註 60 筆（任務卡 T-103：讀 review_sheet 的 id → 原文在 data/labels.jsonl 以外的原始資料 data/ptt_lexus.jsonl；輸出 data/codex_labels.csv；不得讀 labels.jsonl 的答案欄），再算雙 AI 一致率。
-- Ino 表格回來 → `check_label_quality.py score` → 寫 `out/label_quality.md`。
-- 階段 3（多來源 import/label/categorize/analyze）→ 階段 4 凍結洞察（Claude 自行決定 Persona，docs/insights.md + lexus_kit/personas.json）→ 5 訊息生成 → 7 架構圖 → 8 簡報大綱與 check_numbers.py → 6 Demo（能做多少做多少）→ 9 影片腳本 → 10 交件檢查表。
-- Ino 非做不可：人工標註、錄影旁白上傳 YouTube、套官方 pptx 模板匯出 PDF、官網交件。
-- 一次只派一個 Codex 任務；Codex 不跑 git；Claude 審 diff 後 merge。commit 結尾加 Co-Authored-By 行。
-
-## 備註
-- venv：`cd lexus_kit && source .venv/bin/activate`；GEMINI_API_KEY 只放環境變數。
-- 數字只能來自 lexus_kit/out/；溝通內容只能引用 lexus_kit/knowledge/（目前只有 lexus_owner_handbook.md，官網保修頁若缺要向 Ino 要或手動整理）。
+## 規則提醒
+- 一律用中文和 Ino 溝通；階段完成、可 /clear 時要明確說。
+- 數字只能來自 lexus_kit/out/；AI 答案永遠不能填進 human_* 或稱為人工。
