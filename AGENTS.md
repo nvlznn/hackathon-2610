@@ -27,4 +27,10 @@ python analyze.py           # 不需 API，重產 out/
 ## 協作方式
 - Git：用 `git switch` / `git restore`，每個任務一個分支，commit 用 Conventional Commits。
 - Codex 負責實作任務；Claude 負責規劃、審查與寫作。互相審對方的產出。
+- Claude 派工給 Codex 的方式（不透過 MCP）：
+  1. 把任務寫成 `tasks/T-xxx.md`（目標、要改的檔案、驗收條件）
+  2. `git switch -c feat/t-xxx`
+  3. `codex exec --sandbox workspace-write "依 tasks/T-xxx.md 完成任務，完成後跑驗收條件裡的指令，並把變更摘要寫到 tasks/T-xxx.result.md"`
+  4. Claude 讀 `T-xxx.result.md` 和 `git diff main...`，審查通過再 `git switch main && git merge --no-ff feat/t-xxx`
+  - 一次只派一個 Codex 任務；超過 10 分鐘沒結束就回報給 Ino。
 - 樣本數 < 5 的組別不下結論；簡報中的數字要附樣本數。
