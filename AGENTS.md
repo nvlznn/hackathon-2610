@@ -35,5 +35,12 @@ python analyze.py           # 不需 API，重產 out/
   - 一次只派一個 Codex 任務；超過 10 分鐘沒結束就回報給 Ino（macOS 沒有 `timeout` 指令，用 Bash 工具本身的 timeout）。
   - Codex 的沙盒不能寫 `.git`：開分支、commit、merge 一律由 Claude 做，Codex 只改檔案。派工時在指令裡寫明「不要執行任何 git 指令」。
   - `T-xxx.result.md` 必須包含：改了哪些檔案、驗收指令與輸出、未完成或有疑慮的地方。沒寫就退回重做。
+## AI 分工與品質機制
+- Gemini＝產品本身的 AI（標註、生成溝通內容）；Claude＝總指揮、寫作、審查；Codex＝實作，兼第二位獨立標註者。
+- 重要產出一律交叉檢查，不讓產出者自己驗收：
+  - 標註：Gemini 與 Codex 獨立標註 → 分歧由 Ino 看原文裁決。
+  - 溝通訊息：程式檢查（數字與頁碼可在 knowledge 找到）+ 獨立 subagent 角色審查（Lexus 售後主管）。
+  - 簡報：評分 subagent + 紅隊 subagent（和泰評審），兩者都不得看過寫作過程。
+- AI 產出永遠不能被標示為人工判斷；AI 生成內容、模擬資料、人工輔助擷取樣本在簡報中都要明確標示。
 - 執行計畫：`docs/RUNBOOK.md`。Ino 說「執行階段 N」時，照該階段的步驟做，完成條件全部達成才回報完成。
 - 樣本數 < 5 的組別不下結論；簡報中的數字要附樣本數。

@@ -11,3 +11,4 @@ lexus_kit/knowledge/
 # 收集工具的暫存與產出
 lexus_kit/collector/queue.html
 lexus_kit/collector/.captest.json
+*.bak
