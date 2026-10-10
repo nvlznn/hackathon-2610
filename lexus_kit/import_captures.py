@@ -70,6 +70,12 @@ def build_mobile01(caps):
     return rows, warn
 
 
+def dcard_published(c):
+    # 頁面上的主文時間是最後編輯時間，可能晚於留言；取兩者中較早者
+    times = [t for t in [c.get("published")] + [x["time"] for x in c["comments"]] if t]
+    return iso_tpe(min(times, key=lambda t: datetime.fromisoformat(t.replace("Z", "+00:00")))) if times else ""
+
+
 def build_dcard(caps):
     best = {}
     for c in caps:
@@ -77,7 +83,7 @@ def build_dcard(caps):
             best[c["id"]] = c
     return [{
         "id": f"dcard_{c['id']}", "source": "Dcard", "board": c.get("board") or "",
-        "url": c["url"], "title": c["title"], "author": "", "published": iso_tpe(c.get("published")),
+        "url": c["url"], "title": c["title"], "author": "", "published": dcard_published(c),
         "content": c["content"],
         "comments": [{"tag": "留言", "user": "", "content": x["content"], "time": iso_tpe(x["time"])} for x in c["comments"]],
     } for c in best.values()]
