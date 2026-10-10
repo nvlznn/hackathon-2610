@@ -1,5 +1,5 @@
 {
-  "version": "draft",
+  "version": "frozen-2026-10-10",
   "source_doc": "docs/insights.md",
   "data_dir": "out/ptt_only",
   "note": "內容與 docs/insights.md 一致；改洞察時先改 insights.md 再同步本檔。數字權重不寫死，由程式從 ref 指向的 CSV 讀取。",
