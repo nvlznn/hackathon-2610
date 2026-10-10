@@ -23,12 +23,20 @@
 - **Ino 同時做**：安裝書籤（`lexus_kit/collector/README.md` 第 1 步），開始收 Dcard／Mobile01（第 2、3 步）。目標：Mobile01 40 串、Dcard 30 篇。第一串 Mobile01 存完，確認右下角提示的則數和頁面一致；不一致就告訴 Claude。
 - 完成條件：merge 進 main；Ino 已收到至少 20 篇。
 
-## 階段 2｜人工驗證 AI 標註（Ino 主做，約 40 分鐘）
-目標：拿到「AI 標註與人工一致率」，這是可行性最有力的證據。
-- Claude：執行 `python check_label_quality.py sample --labels data/labels.jsonl --n 60`，產生 `data/review_sheet.csv`，告訴 Ino 要填哪三欄、每欄的判斷規則（從 `label_with_gemini.py` 的規則摘要成 5 行內）。
-- **Ino**：用 Excel／Numbers 填完 60 筆（先不看 AI 答案），存成 CSV UTF-8。
-- Claude：執行 `score`，把一致率寫進 `out/label_quality.md`（各欄位一致率 + n）。
-- 完成條件：`out/label_quality.md` 存在。若某欄一致率 < 70%，Claude 提出修正方案，但今天不重標，只在簡報寫限制。
+## 階段 2｜標註品質：雙 AI 交叉標註 + 人工裁決（約 50 分鐘）
+目標：拿到可以放進簡報、經得起追問的標註品質數字，並把人工時間花在最難的案例。
+1. Claude 派 Codex（任務卡 T-103）：只讀 `data/review_sheet.csv` 的 id 與 `data/ptt_lexus.jsonl` 原文，依 `label_with_gemini.py` 的規則獨立標 `relevant／sentiment／stance`，輸出 `data/codex_labels.csv`。**不得讀 `labels.jsonl`、`labels.csv`、review_sheet 的人工欄位。**
+2. Claude 比對 Gemini 與 Codex，產生 `data/disagreements.csv`（兩者任一欄不同的列，附原文連結與兩邊答案）。
+3. **Ino 人工**：
+   - 先確認 `review_sheet.csv` 的人工欄位是自己填的；若有任何格不是本人判斷，從 `review_sheet.csv.bak` 還原重填。
+   - 判斷時要點開原文，不能只看 `summary`（那是 Gemini 寫的，會讓一致率虛高）；至少 `relevant = 是` 的列與 `disagreements.csv` 的列要看原文。
+   - 在 `disagreements.csv` 填 `adjudicated` 欄（最終答案）。
+4. Claude 執行 `check_label_quality.py score`，寫 `out/label_quality.md`，分開列出、各附 n：
+   - Gemini vs 人工、Codex vs 人工（人工一致率）
+   - Gemini vs Codex（雙 AI 一致率）
+   - 分歧案例數與人工裁決結果；Gemini 錯在哪幾類（作為階段 3 的範例來源）
+- 完成條件：`out/label_quality.md` 存在且三組數字齊全。任一欄人工一致率 < 70% 時，在簡報限制頁寫明，並在階段 3 用範例改善。
+- 鐵則：AI 的答案永遠不能填進 `human_*` 欄位或被稱為人工標註。
 
 ## 階段 3｜多來源資料（收集量達標後，約 30 分鐘）
 - Claude 開 `feat/multi-source`：
@@ -36,6 +44,12 @@
   2. `python label_with_gemini.py --inp data/forum_manual.jsonl --out data/labels.jsonl`（只標新的）。
   3. `python categorize.py apply && python analyze.py`。
   4. 回報：各來源篇數、relevant 篇數；五個關鍵發現有沒有改變（列前後數字）；樣本數 < 5 的組別。
+- 兩段式標註（品質優先，在 merge 前做）：
+  1. 派 Codex 修改 `label_with_gemini.py`：新增 `--model`（覆蓋 `GEMINI_MODEL`）、`--fewshot <檔案>`（把範例附在 prompt 規則後）、輸出新增 `confidence`（高／中／低）與 `reason` 欄位；`--ids <檔案>` 只重標指定 id。不得改動既有欄位定義。
+  2. 範例：從 `disagreements.csv` 的人工裁決挑 3–5 則最具代表性的（含原文片段與正確答案），存 `data/fewshot.md`。
+  3. 對所有 `relevant = True` 的文章（含新來源），用帳號可用的較強 Gemini 模型 + few-shot 重標，輸出 `data/labels_v2.jsonl`；其餘文章維持第一段結果。
+  4. 抽 20 篇比較 v1／v2；若 v2 在人工裁決過的案例上更準，就以 v2 取代並重跑 categorize + analyze，在 `out/label_quality.md` 記錄改善幅度。
+  5. `confidence = 低` 的文章列成 `data/low_confidence.csv`；不進入代表原文與 Persona 依據，簡報寫明處理方式。
 - merge。
 - **Ino 同時做**：讀 `07_quotes.csv` 價格類 15 篇原文，回答 Claude：車主不滿的是「貴」還是「不透明、被當盤子」？舉 2–3 句原文為證。
 - 完成條件：`out/summary.md` 含三個來源；Ino 的價格判斷已寫進 `docs/insights.md`。
@@ -60,7 +74,12 @@
   3. 自動檢查（不用 LLM）：citations 的頁碼必須在 knowledge 中出現；訊息中的每個數字（金額、年限、里程、百分比）都必須能在 knowledge 原文找到；不得出現「最便宜」「保證」等未經授權的承諾詞。輸出欄位 `check = 通過／不通過 + 原因`。
   4. 語氣：Lexus 品牌語氣（尊重、不推銷、以車主為中心），LINE 訊息 120 字內。
   5. 驗收：跑完、至少 70% 通過檢查。
-- Claude 挑每個 Persona 最好的 1–2 則，寫進 `docs/insights.md` 的「訊息範例」段。
+- 第二道檢查（角色審查）：Claude 開一個沒看過生成過程的 subagent，扮演「Lexus 台灣售後服務部門主管」，只給它 `personas.json`、`knowledge/` 與通過自動檢查的訊息，逐則評分（1–5）：
+  1. 會不會讓車主覺得被推銷或被監控？
+  2. 有沒有回應該 Persona 的核心痛點（例如價格不透明）？
+  3. 以品牌立場，你敢不敢真的發出去？哪一句要改？
+  結果寫 `out/messages_review.csv`。三項都 ≥ 4 分才算合格；不合格的依建議改寫後重跑兩道檢查，最多兩輪。
+- Claude 從「自動檢查通過且角色審查合格」的訊息中，挑每個 Persona 最好的 1–2 則，寫進 `docs/insights.md` 的「訊息範例」段。
 - 完成條件：`out/messages.csv` 存在，有挑好的範例。
 
 ## 階段 6｜Demo（約 2.5 小時，可砍）
@@ -102,7 +121,13 @@
 - Claude 檢查：
   1. 開一個沒看過寫作過程的 subagent，只給它 `docs/brief.md` 和 PDF 文字，依初賽四項評分逐項打分（1–10）並列出前五個缺口。
   2. 寫 `scripts/check_numbers.py`：抽出 PDF 中所有數字，比對 `out/` 與 `knowledge/`，列出找不到來源的數字。
-  3. 依兩份報告修改，最多兩輪。
+  3. 紅隊評審：再開一個獨立 subagent，扮演「和泰集團評審（售後業務主管 + 資料科學主管）」，讀完簡報後提出最難回答的 5 個問題（例：網路聲量能代表全體車主嗎？沒有 CRM 資料憑什麼說能落地？成本多少？和現有 AI 客服差在哪？誤判風險怎麼控制？）。Claude 把每題的回答寫進 `docs/qa_prep.md`，並確認簡報或補充資料裡找得到答案依據；找不到就補。
+  4. 依三份報告修改，最多兩輪。
+- AI 使用揭露（寫在第 15 頁補充資料，一小段）：
+  - 解決方案中的 AI（主頁已詳述）：Gemini 結構化標註、雙 AI 交叉標註 + 人工裁決、Gemini 生成溝通內容 + 出處自動檢查 + 角色審查、服務專員人工核准。
+  - 開發過程：團隊以 Claude Code 與 Codex 輔助撰寫程式與文件草稿；Persona、洞察結論、溝通策略、標註裁決由團隊判斷與確認。這也代表 Lexus 導入與維護此系統的人力成本低。
+  - 標示：AI 生成內容標「AI 生成範例」、CRM 標「模擬資料」、Mobile01／Dcard 標「人工輔助擷取樣本」。
+
 - 完成條件：PDF ≤ 15 頁，數字檢查全數有來源。
 
 ## 階段 9｜影片（約 2 小時）
